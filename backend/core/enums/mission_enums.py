@@ -1,0 +1,50 @@
+from enum import StrEnum
+
+
+class MissionType(StrEnum):
+    FLOOD_MONITORING = "FLOOD_MONITORING"
+    COASTAL_PATROL = "COASTAL_PATROL"
+    EMERGENCY_DELIVERY = "EMERGENCY_DELIVERY"
+    TRAFFIC_SURVEILLANCE = "TRAFFIC_SURVEILLANCE"
+    ENVIRONMENTAL_MONITORING = "ENVIRONMENTAL_MONITORING"
+
+
+class MissionStatus(StrEnum):
+    PENDING = "PENDING"
+    ACTIVE = "ACTIVE"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    ABORTED = "ABORTED"
+
+
+class MissionPriority(StrEnum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class RouteStrategyType(StrEnum):
+    FASTEST = "FASTEST"
+    SAFE = "SAFE"
+    BATTERY_SAVING = "BATTERY_SAVING"
+
+
+class MaricaRegion(StrEnum):
+    CENTRO = "Centro"
+    ITAIPUACU = "Itaipuaçu"
+    PONTA_NEGRA = "Ponta Negra"
+    INOA = "Inoã"
+    SAO_JOSE = "São José"
+    CORDEIRINHO = "Cordeirinho"
+
+
+class EventType(StrEnum):
+    LOW_BATTERY = "LOW_BATTERY"
+    BAD_WEATHER = "BAD_WEATHER"
+    SIGNAL_LOST = "SIGNAL_LOST"
+    MISSION_STARTED = "MISSION_STARTED"
+    MISSION_COMPLETED = "MISSION_COMPLETED"
+    RETURN_TO_BASE = "RETURN_TO_BASE"
+    OBSTACLE_DETECTED = "OBSTACLE_DETECTED"
+    MISSION_FAILED = "MISSION_FAILED"

@@ -1,0 +1,52 @@
+# ─── Python / Django ───────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Django
+*.sqlite3
+*.log
+local_settings.py
+media/
+staticfiles/
+static_collected/
+
+# Virtualenv
+.venv/
+venv/
+env/
+
+# ─── Node / React (Vite) ───────────────────────────────────────────────────────
+node_modules/
+dist/
+frontend/dist/
+.npm/
+.yarn/
+
+# ─── Environment & secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Docker ────────────────────────────────────────────────────────────────────
+.docker/
+
+# ─── IDEs & OS ─────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #080c14;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1a2d4a;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #00d4ff44;
+  }
+}
+
+/* Leaflet dark theme overrides */
+.leaflet-container {
+  background: #080c14 !important;
+  font-family: inherit;
+  border-radius: inherit;
+}
+.leaflet-control-attribution {
+  background: rgba(8, 12, 20, 0.75) !important;
+  color: #3a5a7a !important;
+  font-size: 9px !important;
+  backdrop-filter: blur(4px);
+}
+.leaflet-control-attribution a { color: #3a5a7a !important; }
+.leaflet-control-zoom a {
+  background: #0d1a2a !important;
+  color: #00d4ff !important;
+  border-color: #1a2d4a !important;
+}
+.leaflet-control-zoom a:hover { background: #1a2d4a !important; }
+.leaflet-popup-content-wrapper {
+  background: #0d1a2a !important;
+  color: #c8d8e8 !important;
+  border: 1px solid #1a2d4a !important;
+  border-radius: 8px !important;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.15) !important;
+}
+.leaflet-popup-tip { background: #0d1a2a !important; }
+
+/* Drone marker animations */
+@keyframes drone-pulse {
+  0%   { transform: translate(-50%, -50%) scale(0.8); opacity: 0.8; }
+  100% { transform: translate(-50%, -50%) scale(2.8); opacity: 0; }
+}
+@keyframes drone-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@layer components {
+  .card {
+    @apply bg-vesper-card border border-vesper-border rounded-xl p-5;
+  }
+  .btn-primary {
+    @apply bg-vesper-cyan text-vesper-bg font-semibold px-5 py-2.5 rounded-lg
+           hover:bg-cyan-300 active:scale-95 transition-all duration-150 text-sm;
+  }
+  .btn-secondary {
+    @apply bg-vesper-border text-vesper-text font-medium px-5 py-2.5 rounded-lg
+           hover:bg-vesper-muted/30 active:scale-95 transition-all duration-150 text-sm;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono font-medium;
+  }
+  .input-field {
+    @apply w-full bg-vesper-surface border border-vesper-border rounded-lg px-3 py-2.5
+           text-vesper-text text-sm focus:outline-none focus:border-vesper-cyan
+           focus:ring-1 focus:ring-vesper-cyan/30 transition-all;
+  }
+  .select-field {
+    @apply input-field appearance-none cursor-pointer;
+  }
+  .label {
+    @apply text-xs font-medium text-vesper-muted uppercase tracking-wider mb-1.5 block;
+  }
+  .section-title {
+    @apply text-lg font-semibold text-white tracking-tight;
+  }
+  .glow-line {
+    @apply h-px w-full bg-gradient-to-r from-transparent via-vesper-cyan/30 to-transparent;
+  }
+}
