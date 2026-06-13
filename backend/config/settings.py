@@ -17,7 +17,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "drones",
     "missions",
-    "api",
+    "adapters",
 ]
 
 MIDDLEWARE = [
