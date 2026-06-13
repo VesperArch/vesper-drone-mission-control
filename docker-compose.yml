@@ -65,6 +65,7 @@ services:
     environment:
       - DEBUG=True
       - DRONE_DB_HOST=db-drones
+      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,drone-service
     ports:
       - "8001:8001"
     volumes:
@@ -133,11 +134,11 @@ services:
       mission-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost/api/system/status/ || exit 1"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "pgrep nginx > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
       retries: 3
-      start_period: 15s
+      start_period: 5s
 
   # ── Frontend ──────────────────────────────────────────────────────────────────
 
