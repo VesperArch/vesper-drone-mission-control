@@ -1,52 +1,119 @@
 version: "3.9"
 
 services:
-  db:
+
+  db-drones:
     image: postgres:16-alpine
-    container_name: vesper_db_prod
-    env_file: .env
+    container_name: vesper_db_drones_prod
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${DRONE_DB_NAME:-vesper_drones}
+      POSTGRES_USER: ${DRONE_DB_USER:-vesper}
+      POSTGRES_PASSWORD: ${DRONE_DB_PASSWORD}
     volumes:
-      - postgres_data_prod:/var/lib/postgresql/data
+      - postgres_drones_prod:/var/lib/postgresql/data
     networks:
       - vesper_net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DRONE_DB_USER:-vesper} -d ${DRONE_DB_NAME:-vesper_drones}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: vesper_backend_prod
-    env_file: .env
+  db-missions:
+    image: postgres:16-alpine
+    container_name: vesper_db_missions_prod
     environment:
-      - DB_ENGINE=django.db.backends.postgresql
-      - POSTGRES_HOST=db
-      - DEBUG=False
-    ports:
-      - "8000:8000"
+      POSTGRES_DB: ${MISSION_DB_NAME:-vesper_missions}
+      POSTGRES_USER: ${MISSION_DB_USER:-vesper}
+      POSTGRES_PASSWORD: ${MISSION_DB_PASSWORD}
+    volumes:
+      - postgres_missions_prod:/var/lib/postgresql/data
     networks:
       - vesper_net
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MISSION_DB_USER:-vesper} -d ${MISSION_DB_NAME:-vesper_missions}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  drone-service:
+    build:
+      context: ./services/drone-service
+      dockerfile: Dockerfile
+    container_name: vesper_drone_service_prod
+    env_file: .env
+    environment:
+      - DEBUG=False
+      - DRONE_DB_HOST=db-drones
+      - ALLOWED_HOSTS=localhost,drone-service
+    networks:
+      - vesper_net
+    restart: unless-stopped
     command: >
       sh -c "python manage.py migrate &&
-             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
+             python manage.py seed_drones &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8001 --workers 4"
+    depends_on:
+      db-drones:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/system/status/')\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/api/drones/')\""]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  mission-service:
+    build:
+      context: ./services/mission-service
+      dockerfile: Dockerfile
+    container_name: vesper_mission_service_prod
+    env_file: .env
+    environment:
+      - DEBUG=False
+      - MISSION_DB_HOST=db-missions
+      - DRONE_SERVICE_URL=http://drone-service:8001
+    networks:
+      - vesper_net
+    restart: unless-stopped
+    command: >
+      sh -c "python manage.py migrate &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8002 --workers 4"
+    depends_on:
+      db-missions:
+        condition: service_healthy
+      drone-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/api/system/status/')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  nginx:
+    image: nginx:alpine
+    container_name: vesper_gateway_prod
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - vesper_net
+    restart: unless-stopped
+    depends_on:
+      drone-service:
+        condition: service_healthy
+      mission-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep nginx > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   frontend:
     build:
@@ -60,7 +127,7 @@ services:
       - vesper_net
     restart: unless-stopped
     depends_on:
-      backend:
+      nginx:
         condition: service_healthy
 
 networks:
@@ -68,4 +135,5 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data_prod:
+  postgres_drones_prod:
+  postgres_missions_prod:
