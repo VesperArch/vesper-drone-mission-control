@@ -1,88 +1,117 @@
-# Vesper Drone Mission Control
+# Vesper — Drone Mission Control
 
-> A modern urban drone coordination platform designed for smart-city operations in Maricá/RJ, Brazil.  
-> Built as a portfolio-grade software architecture project demonstrating five classical Design Patterns in a realistic full-stack application.
-
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Design Patterns](#design-patterns)
-4. [Project Structure](#project-structure)
-5. [Tech Stack](#tech-stack)
-6. [Getting Started](#getting-started)
-7. [API Reference](#api-reference)
-8. [UML Diagrams](#uml-diagrams)
-9. [Simulation Flow](#simulation-flow)
-10. [Future Improvements](#future-improvements)
+Sistema de coordenação de frotas de drones para operações de cidade inteligente em Maricá/RJ. Desenvolvido como projeto de arquitetura de software aplicada, cobrindo Clean Architecture, microsserviços, padrões GoF, TDD, BDD e Docker do zero à produção.
 
 ---
 
-## Overview
+## O Problema
 
-Vesper is a mission control dashboard for coordinating drone fleets performing smart-city operations:
+Maricá opera drones para monitoramento de enchentes, patrulha costeira, entrega de emergência e vigilância de tráfego. O desafio não é apenas voar — é coordenar múltiplos drones com tipos e capacidades diferentes, calcular rotas com trade-offs distintos (velocidade vs segurança vs bateria), registrar eventos em tempo real e garantir que nenhuma missão colida com outra. Um drone marcado como IDLE num registro e ATIVO em outro é um acidente esperando para acontecer.
 
-| Operation | Regions Covered |
-|---|---|
-| Flood Monitoring | Itaipuaçu, Ponta Negra |
-| Coastal Patrol | Cordeirinho, São José |
-| Emergency Delivery | Centro, Inoã |
-| Traffic Surveillance | Centro, São José |
-| Environmental Monitoring | All regions |
-
-The system simulates the complete mission lifecycle: deployment, routing, real-time event generation, observer notifications, and status tracking — all backed by a clean, pattern-driven architecture.
+A solução precisa de um estado global confiável, criação de drones por tipo sem if/else, troca de algoritmo de rota em runtime, notificação desacoplada de eventos e isolamento total da lógica de negócio do framework web.
 
 ---
 
-## Architecture
+## Arquitetura — Microsserviços
+
+O sistema é dividido em dois serviços independentes com bancos separados, comunicando-se via HTTP, com nginx como API gateway.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     FRONTEND (React)                     │
-│  Dashboard │ Create Mission │ Active Missions │ Logs     │
-└──────────────────────────┬──────────────────────────────┘
-                           │ HTTP/REST
-┌──────────────────────────▼──────────────────────────────┐
-│                    DJANGO REST API                        │
-│   /drones  /missions/create  /missions  /system/status   │
-└──────────────────────────┬──────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────┐
-│               FACADE (DroneMissionFacade)                 │
-│  Orchestrates all subsystems behind a single entry point  │
-└────┬──────────────┬──────────────┬────────────────┬──────┘
-     │              │              │                │
-  SINGLETON      FACTORY       STRATEGY         OBSERVER
-  Control        Drones        Routes           Events
-  Center         Creation      Algorithms       Notifications
+┌─────────────────────────────────────────────────────────────┐
+│                     Frontend  :5173                          │
+│              React 18 · Vite · TailwindCSS                   │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ HTTP
+                       ┌───────▼────────┐
+                       │  nginx :8000   │  ← API Gateway
+                       │  (port 80)     │
+                       └───┬───────┬────┘
+                           │       │
+            /api/drones/   │       │  /api/missions/
+                           │       │  /api/system/
+               ┌───────────▼─┐   ┌─▼───────────────┐
+               │drone-service│   │ mission-service  │
+               │   :8001     │◄──│    :8002         │
+               │             │   │ HttpDroneRepo    │
+               └──────┬──────┘   └────────┬─────────┘
+                      │                   │
+               ┌──────▼──────┐   ┌────────▼─────────┐
+               │  db-drones  │   │   db-missions    │
+               │ PostgreSQL  │   │   PostgreSQL      │
+               └─────────────┘   └──────────────────┘
 ```
 
-### Core Principles
+**drone-service** gerencia a frota: cadastro, status e bateria dos drones. Expõe `GET /api/drones/`, `GET /api/drones/{id}/` e `PATCH /api/drones/{id}/status/`.
 
-- **Clean Architecture** — domain logic is isolated from framework concerns
-- **SOLID** — single responsibility per class, open for extension, closed for modification
-- **Explicit Patterns** — each pattern is isolated in its own module with header comments
-- **No God Objects** — the Facade delegates; it does not implement business logic directly
+**mission-service** contém toda a lógica de negócio: casos de uso, padrões GoF, estratégias de rota, observers e o ciclo de vida das missões. Quando precisa de dados de um drone, chama o drone-service via HTTP — sem compartilhar banco nem modelo Django.
+
+A comunicação inter-serviço é feita pelo `HttpDroneRepository`, que implementa a mesma interface abstrata `DroneRepository` que o monolito usava com ORM. O `StartMissionUseCase` não sabe — e não precisa saber — se os dados do drone vêm de um banco local ou de uma chamada HTTP.
 
 ---
 
-## Design Patterns
+## Arquitetura Limpa
 
-### 1. Singleton — `MissionControlCenter`
+```
+mission-service/
+├── domain/                 ← Entidades puras e contratos (sem Django, sem requests)
+│   ├── entities/
+│   │   ├── drone.py        ← DroneEntity (dataclass)
+│   │   └── mission.py      ← MissionEntity (dataclass)
+│   └── repositories/
+│       ├── drone_repository.py    ← ABC: get_by_id, save, list_all
+│       └── mission_repository.py  ← ABC: create, log_event, update_status
+│
+├── application/            ← Casos de uso (depende só de domain/)
+│   └── use_cases/
+│       └── start_mission_use_case.py
+│
+├── infrastructure/         ← Implementações concretas (ORM, HTTP)
+│   └── repositories/
+│       ├── django_mission_repository.py  ← Mission via Django ORM
+│       └── http_drone_repository.py      ← Drone via HTTP para drone-service
+│
+└── adapters/               ← Interface com o mundo externo (views Django)
+    ├── views/
+    └── urls/
+```
 
-**Location:** `backend/core/singleton/mission_control_center.py`
+A regra de dependência é respeitada: camadas internas não importam camadas externas. `StartMissionUseCase` importa `DroneRepository` (domain). `HttpDroneRepository` importa `DroneRepository` (domain) e faz chamadas HTTP (infrastructure). A inversão de dependência garante que trocar de ORM para HTTP não exigiu mudar uma linha no caso de uso.
 
-**Why:** Only one central control room may exist. The Singleton guarantees that every subsystem (API, Facade, Observers) shares identical state — preventing double-dispatch bugs where two separate registries could hold diverging drone status.
+---
 
-**Implementation:**
+## SOLID
+
+**Single Responsibility** — cada classe faz uma coisa. `DroneMissionFacade` orquestra; `StartMissionUseCase` valida e persiste; `HttpDroneRepository` faz chamadas HTTP; `LoggerObserver` escreve logs. Nenhuma dessas classes sabe da existência das outras diretamente.
+
+**Open/Closed** — adicionar um novo tipo de drone é criar uma subclasse de `DroneFactory` sem tocar nas existentes. Adicionar uma nova estratégia de rota é implementar `RouteStrategy`. Adicionar um novo observer é implementar `MissionObserverInterface`. Nenhum código existente muda.
+
+**Liskov Substitution** — qualquer `RouteStrategy` pode ser passada para o caso de uso e o resultado é um `RouteResult` válido. Qualquer `DroneRepository` (ORM ou HTTP) pode ser injetado na `DroneMissionFacade` e o comportamento é o esperado — os testes com `FakeDroneRepository` provam isso.
+
+**Interface Segregation** — `DroneRepository` expõe `get_by_id`, `save` e `list_all`. `MissionRepository` expõe `create`, `get_by_id`, `log_event` e `update_status`. As interfaces são pequenas e específicas; nenhuma implementação é forçada a implementar métodos que não usa.
+
+**Dependency Inversion** — `StartMissionUseCase` recebe `DroneRepository` e `MissionRepository` como parâmetros. `DroneMissionFacade` recebe os repositórios no construtor com default para as implementações concretas. Isso permite injetar fakes nos testes sem nenhum mock de framework.
+
+```python
+# O caso de uso não importa Django nem requests — só abstrações
+class StartMissionUseCase:
+    def __init__(self, drone_repo: DroneRepository, mission_repo: MissionRepository):
+        self._drone_repo = drone_repo
+        self._mission_repo = mission_repo
+```
+
+---
+
+## Padrões de Projeto (GoF)
+
+### Singleton — `MissionControlCenter`
+
+Um estado global compartilhado por todos os subsistemas: quais drones estão ativos, quais missões estão em andamento, log de eventos. Dois registros divergentes causariam double-dispatch — um drone IDLE num registro e ATIVO em outro resultaria em missões concorrentes no mesmo hardware.
+
 ```python
 class MissionControlCenter:
     _instance: Optional[MissionControlCenter] = None
-    _initialized: bool = False
 
-    def __new__(cls) -> MissionControlCenter:
+    def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -94,161 +123,147 @@ class MissionControlCenter:
         return cls._instance
 ```
 
-**Responsibilities:** track active missions · register drones · collect events · expose statistics
-
 ---
 
-### 2. Factory Method — `DroneFactory`
+### Factory Method — `DroneFactory`
 
-**Location:** `backend/drones/factories/`
-
-**Why:** Each drone type has meaningfully different hardware specs. The Factory Method pattern decouples drone creation from the calling code, making it trivial to add a new drone variant without modifying any existing class.
+Surveillance, Emergency e Delivery têm specs de hardware radicalmente diferentes. Sem factory, cada criação de drone seria um bloco `if/elif` com os defaults hardcoded no meio do código de negócio. Com factory, adicionar um `MedicalDroneFactory` não toca em nenhuma linha existente.
 
 ```
 DroneFactory (abstract)
-  ├── SurveillanceDroneFactory  →  Vesper-S400 Sentinel  (95 km/h · 60 km range)
-  ├── EmergencyDroneFactory     →  Vesper-E200 Raptor    (140 km/h · 35 km range)
-  └── DeliveryDroneFactory      →  Vesper-D800 Carrier   (65 km/h  · 25 km range)
+  ├── SurveillanceDroneFactory  →  Vesper-S400 Sentinel   95 km/h · 60 km · 0.5 kg payload
+  ├── EmergencyDroneFactory     →  Vesper-E200 Raptor    140 km/h · 35 km · 2.0 kg payload
+  └── DeliveryDroneFactory      →  Vesper-D800 Carrier    65 km/h · 25 km · 8.0 kg payload
 ```
 
-Each factory implements `create_drone() → DroneConfig` and returns a fully-specified value object.
+Cada factory implementa `create_drone() → DroneConfig`. O `DroneConfig` é um value object imutável — a factory cria, o caller usa.
 
 ---
 
-### 3. Strategy — `RouteStrategy`
+### Strategy — `RouteStrategy`
 
-**Location:** `backend/missions/strategies/`
-
-**Why:** Route calculation involves fundamentally different trade-offs (speed vs safety vs battery) that vary independently of the mission itself. Strategy makes these algorithms interchangeable at runtime.
+Velocidade, segurança e economia de bateria são trade-offs que variam por missão, não por tipo de drone. O operador escolhe no momento da criação da missão qual algoritmo usar. Em runtime, o caso de uso recebe a string da estratégia e seleciona a implementação via dicionário:
 
 ```
-RouteStrategy (abstract)
-  ├── FastestRouteStrategy     — Direct path, maximum speed, ignores weather (risk: 0.45)
-  ├── SafeRouteStrategy        — Detour through cleared airspace (risk: 0.10)
-  └── BatterySavingStrategy    — Coastal low-altitude, wind-assisted (risk: 0.25)
+FastestRouteStrategy    — rota direta, ignora risco climático       weather_risk: 0.45
+SafeRouteStrategy       — desvio por espaço aéreo limpo             weather_risk: 0.10
+BatterySavingStrategy   — rota costeira baixa altitude              weather_risk: 0.25
 ```
 
-Each strategy returns a `RouteResult` with: `distance_km`, `estimated_duration_min`, `battery_consumption_pct`, `weather_risk_score`, `waypoints`.
+Cada estratégia recebe `(origin, destination, speed_kmh, range_km)` e retorna um `RouteResult` com duração estimada, distância, consumo de bateria, risco climático e waypoints.
 
 ---
 
-### 4. Observer — `MissionSubject` + Observers
+### Observer — `MissionSubject` + Observers
 
-**Location:** `backend/core/events/` · `backend/missions/observers/`
-
-**Why:** Mission lifecycle events must notify multiple independent systems without coupling them. Adding a new observer (e.g. `SlackNotifierObserver`) requires zero changes to the subject.
+Quando um evento ocorre numa missão (bateria baixa, missão concluída, obstáculo detectado), três sistemas precisam reagir de forma independente: o logger escreve no terminal, o alert buffer armazena para o operador, e o status observer sincroniza o banco e o Singleton. Acoplamento direto entre esses sistemas seria impossível de manter.
 
 ```
-MissionSubject
-  ├── attach(observer)
-  ├── detach(observer)
-  └── notify(event) ──→ LoggerObserver         # writes structured logs via loguru
-                    ──→ AlertObserver           # buffers operator alerts for critical events
-                    └── MissionStatusObserver  # syncs DB + Singleton registry
+MissionSubject.notify(event)
+  ├── LoggerObserver         → loguru structured log
+  ├── AlertObserver          → buffer de alertas para o frontend
+  └── MissionStatusObserver  → atualiza Mission.status no banco + Singleton
 ```
 
-**Events fired:** `MISSION_STARTED` · `MISSION_COMPLETED` · `LOW_BATTERY` · `BAD_WEATHER` · `SIGNAL_LOST` · `OBSTACLE_DETECTED`
+Adicionar `SlackNotifierObserver` ou `WebhookObserver` é implementar a interface e chamar `subject.attach()`. O subject não muda.
 
 ---
 
-### 5. Facade — `DroneMissionFacade`
+### Facade — `DroneMissionFacade`
 
-**Location:** `backend/core/facade/drone_mission_facade.py`
-
-**Why:** Without the Facade, every API view would need to coordinate five independent subsystems. The pattern hides that complexity behind one method call, keeps views thin, and provides a single seam for testing.
+Sem facade, a view HTTP precisaria conhecer DroneRepository, StartMissionUseCase, threading, MissionSubject e os três observers. A view ficaria com 60+ linhas de orquestração. Com facade, a view faz uma chamada:
 
 ```python
 facade = DroneMissionFacade()
 result = facade.create_and_start_mission(payload)
-# Internally: loads drone → computes route → persists mission →
-#             attaches observers → fires events → syncs DB → returns result
 ```
+
+Internamente: valida o drone → calcula rota → persiste missão → atualiza drone → registra no Singleton → dispara eventos → inicia thread de ciclo de vida. Tudo escondido. A view não sabe que existe uma thread em background.
+
+No contexto de microsserviços, a única mudança na Facade foi `HttpDroneRepository()` no lugar de `DjangoDroneRepository()`. O `StartMissionUseCase` não mudou nenhuma linha.
 
 ---
 
-## Project Structure
+## TDD
+
+164 testes cobrindo todas as camadas, escritos antes ou junto com o código.
 
 ```
-vesper-drone-mission-control/
-├── docker-compose.yml
-├── README.md
+tests/
+├── unit/
+│   ├── test_strategies.py          # 27 testes — fórmulas de cada estratégia
+│   ├── test_factories.py           # 23 testes — specs dos 3 tipos de drone
+│   ├── test_observers.py           # 16 testes — lógica de alert buffer e logger
+│   ├── test_events.py              # 10 testes — attach/detach/notify do subject
+│   ├── test_singleton.py           # 21 testes — instância única, registro, estatísticas
+│   └── test_start_mission_use_case.py  # 21 testes — use case com repositórios fake
 │
-├── backend/
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   ├── manage.py
-│   │
-│   ├── config/                    # Django project config
-│   │   ├── settings.py
-│   │   └── urls.py
-│   │
-│   ├── core/                      # Pure domain layer (no Django deps)
-│   │   ├── enums/                 # All system enumerations
-│   │   ├── singleton/             # ★ Singleton pattern
-│   │   │   └── mission_control_center.py
-│   │   ├── events/                # ★ Observer pattern (Subject + interface)
-│   │   │   └── mission_events.py
-│   │   └── facade/                # ★ Facade pattern
-│   │       └── drone_mission_facade.py
-│   │
-│   ├── drones/
-│   │   ├── factories/             # ★ Factory Method pattern
-│   │   │   ├── base_factory.py
-│   │   │   ├── surveillance_factory.py
-│   │   │   ├── emergency_factory.py
-│   │   │   └── delivery_factory.py
-│   │   ├── models.py
-│   │   └── serializers.py
-│   │
-│   ├── missions/
-│   │   ├── strategies/            # ★ Strategy pattern
-│   │   │   ├── base_strategy.py
-│   │   │   ├── fastest_route.py
-│   │   │   ├── safe_route.py
-│   │   │   └── battery_saving.py
-│   │   ├── observers/             # ★ Observer pattern (Concrete observers)
-│   │   │   ├── logger_observer.py
-│   │   │   ├── alert_observer.py
-│   │   │   └── mission_status_observer.py
-│   │   ├── models.py
-│   │   └── serializers.py
-│   │
-│   └── api/
-│       ├── views/                 # Thin HTTP handlers
-│       └── urls/
-│
-└── frontend/
-    ├── Dockerfile
-    ├── src/
-    │   ├── api/                   # Axios API layer
-    │   ├── components/
-    │   │   ├── layout/            # Sidebar, TopBar, Layout
-    │   │   ├── dashboard/         # StatCard, MissionCard, DroneStatusCard, EventFeed
-    │   │   └── mission/           # MissionTimeline
-    │   └── pages/                 # Dashboard, CreateMission, ActiveMissions, MissionLogs
-    └── tailwind.config.js
+└── integration/
+    ├── test_api_drones.py          #  9 testes — endpoints HTTP de drones
+    ├── test_api_missions.py        # 15 testes — endpoints HTTP de missões
+    └── test_facade.py              #  9 testes — facade end-to-end com banco SQLite
+```
+
+Os testes de `StartMissionUseCase` usam `FakeDroneRepository` e `FakeMissionRepository` — implementações em memória das ABCs de domínio. Sem mock de framework, sem patch, sem acesso a banco. Isso é possível exatamente porque a Dependency Inversion foi aplicada corretamente.
+
+```bash
+cd backend
+.venv/bin/pytest tests/ -v --cov=. --cov-report=term-missing
 ```
 
 ---
 
-## Tech Stack
+## BDD
 
-| Layer | Technology |
-|---|---|
-| Backend | Python 3.12 · Django 5 · Django REST Framework |
-| Logging | loguru · Rich |
-| Frontend | React 18 · Vite · TailwindCSS · Axios · Lucide Icons |
-| Database | SQLite (dev) |
-| Container | Docker · Docker Compose |
+Cenários de comportamento escritos em Gherkin, executados com pytest-bdd.
+
+```
+backend/features/
+├── route_strategy.feature      # Dado que um drone tem velocidade X, quando calcula rota SAFE...
+├── drone_factory.feature       # Dado que crio um drone SURVEILLANCE, então speed_kmh deve ser 95
+├── mission_lifecycle.feature   # Dado um drone IDLE, quando inicio missão, então status vira ACTIVE
+└── alert_observer.feature      # Dado evento BAD_WEATHER com severity ALERT, então buffer não vazio
+```
+
+Exemplo de cenário:
+
+```gherkin
+Feature: Route Strategy Selection
+
+  Scenario: Safe route avoids weather risk
+    Given a drone with speed 95 km/h and range 60 km
+    When I calculate a SAFE route to "Itaipuaçu"
+    Then the weather risk score should be below 0.20
+    And the route should include an intermediate waypoint
+```
+
+```bash
+cd backend
+.venv/bin/pytest tests/bdd/ -v
+```
 
 ---
 
-## Getting Started
+## Docker
 
-### Prerequisites
-- Docker and Docker Compose installed
+Seis containers orquestrados com dependências e healthchecks encadeados:
 
-### Run
+```yaml
+db-drones      # PostgreSQL para drone-service
+db-missions    # PostgreSQL para mission-service
+drone-service  # Django :8001 — aguarda db-drones healthy
+mission-service# Django :8002 — aguarda db-missions + drone-service healthy
+nginx          # API gateway :8000 — aguarda ambos os serviços healthy
+frontend       # React/Vite :5173 — aguarda nginx healthy
+```
+
+O `depends_on` com `condition: service_healthy` garante que nenhum serviço sobe antes do que ele depende estar respondendo. O drone-service roda `seed_drones` no primeiro boot via Factory Method, criando 6 drones nos 3 tipos.
+
+---
+
+## Como rodar
+
+**Pré-requisito:** Docker e Docker Compose instalados.
 
 ```bash
 git clone <repo>
@@ -257,48 +272,42 @@ cp .env.example .env
 docker compose up --build
 ```
 
-| Service | URL |
+A ordem de inicialização é automática. Quando todos os containers estiverem healthy:
+
+| Serviço | URL |
 |---|---|
 | Frontend | http://localhost:5173 |
-| Backend API | http://localhost:8000/api |
+| API Gateway | http://localhost:8000/api/ |
+| drone-service (direto) | http://localhost:8001/api/drones/ |
+| mission-service (direto) | http://localhost:8002/api/missions/ |
 
-The backend automatically runs `python manage.py seed_demo` on first start, which:
-1. Creates 6 drones using the **Factory Method** pattern
-2. Registers them with the **Singleton** registry
-3. Runs 2 sample missions through the **Facade**
-
-### Run without Docker
-
+Para parar sem perder dados:
 ```bash
-# Backend
-cd backend
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py seed_demo
-python manage.py runserver
+docker compose down
+```
 
-# Frontend (separate terminal)
-cd frontend
-npm install
-npm run dev
+Para resetar tudo (apaga bancos):
+```bash
+docker compose down -v
 ```
 
 ---
 
-## API Reference
+## API
 
-| Method | Endpoint | Description |
+| Método | Endpoint | Serviço |
 |---|---|---|
-| GET | `/api/drones/` | List all drones |
-| GET | `/api/drones/{id}/` | Get drone detail |
-| GET | `/api/missions/` | List all missions |
-| POST | `/api/missions/create/` | Create + start mission (via Facade) |
-| GET | `/api/missions/{id}/` | Get mission with timeline |
-| GET | `/api/missions/logs/` | All mission events |
-| GET | `/api/system/status/` | Singleton stats + recent events |
-| GET | `/api/system/metadata/` | Enum options for form dropdowns |
+| GET | `/api/drones/` | drone-service |
+| GET | `/api/drones/{id}/` | drone-service |
+| PATCH | `/api/drones/{id}/status/` | drone-service (interno) |
+| GET | `/api/missions/` | mission-service |
+| POST | `/api/missions/create/` | mission-service |
+| GET | `/api/missions/{id}/` | mission-service |
+| GET | `/api/missions/logs/` | mission-service |
+| GET | `/api/system/status/` | mission-service |
+| GET | `/api/system/metadata/` | mission-service |
 
-### Create Mission — Request Body
+Payload para criar missão:
 
 ```json
 {
@@ -313,227 +322,31 @@ npm run dev
 
 ---
 
-## UML Diagrams
+## Stack
 
-### Class Diagram — Design Patterns
-
-```mermaid
-classDiagram
-    %% ── Singleton ──────────────────────────────────────────
-    class MissionControlCenter {
-        -_instance: MissionControlCenter
-        -_initialized: bool
-        -_active_missions: dict
-        -_registered_drones: dict
-        -_event_log: list
-        +get_instance()$ MissionControlCenter
-        +register_drone(drone)
-        +register_mission(mission)
-        +log_event(event)
-        +get_statistics() dict
-    }
-
-    %% ── Factory Method ─────────────────────────────────────
-    class DroneFactory {
-        <<abstract>>
-        +create_drone()* DroneConfig
-        +build() DroneConfig
-    }
-    class SurveillanceDroneFactory {
-        +create_drone() DroneConfig
-    }
-    class EmergencyDroneFactory {
-        +create_drone() DroneConfig
-    }
-    class DeliveryDroneFactory {
-        +create_drone() DroneConfig
-    }
-    class DroneConfig {
-        +model: str
-        +drone_type: str
-        +speed_kmh: float
-        +altitude_limit_m: float
-        +payload_kg: float
-        +range_km: float
-    }
-    DroneFactory <|-- SurveillanceDroneFactory
-    DroneFactory <|-- EmergencyDroneFactory
-    DroneFactory <|-- DeliveryDroneFactory
-    DroneFactory ..> DroneConfig : creates
-
-    %% ── Strategy ───────────────────────────────────────────
-    class RouteStrategy {
-        <<abstract>>
-        +calculate_route(origin, dest, speed, range)* RouteResult
-        +strategy_name()* str
-    }
-    class FastestRouteStrategy {
-        +calculate_route() RouteResult
-    }
-    class SafeRouteStrategy {
-        +calculate_route() RouteResult
-    }
-    class BatterySavingStrategy {
-        +calculate_route() RouteResult
-    }
-    class RouteResult {
-        +strategy_used: str
-        +estimated_duration_min: float
-        +distance_km: float
-        +battery_consumption_pct: float
-        +weather_risk_score: float
-        +waypoints: list
-    }
-    RouteStrategy <|-- FastestRouteStrategy
-    RouteStrategy <|-- SafeRouteStrategy
-    RouteStrategy <|-- BatterySavingStrategy
-    RouteStrategy ..> RouteResult : returns
-
-    %% ── Observer ───────────────────────────────────────────
-    class MissionObserverInterface {
-        <<abstract>>
-        +update(event: MissionEventData)*
-    }
-    class MissionSubject {
-        -_observers: list
-        +attach(observer)
-        +detach(observer)
-        +notify(event)
-    }
-    class LoggerObserver {
-        +update(event)
-    }
-    class AlertObserver {
-        -_alerts: list
-        +update(event)
-        +get_alerts() list
-    }
-    class MissionStatusObserver {
-        +update(event)
-    }
-    MissionObserverInterface <|.. LoggerObserver
-    MissionObserverInterface <|.. AlertObserver
-    MissionObserverInterface <|.. MissionStatusObserver
-    MissionSubject o--> MissionObserverInterface : notifies
-
-    %% ── Facade ─────────────────────────────────────────────
-    class DroneMissionFacade {
-        -_control: MissionControlCenter
-        +create_and_start_mission(payload) dict
-    }
-    DroneMissionFacade --> MissionControlCenter
-    DroneMissionFacade --> DroneFactory
-    DroneMissionFacade --> RouteStrategy
-    DroneMissionFacade --> MissionSubject
-```
-
----
-
-### Sequence Diagram — Mission Lifecycle
-
-```mermaid
-sequenceDiagram
-    participant UI as Frontend
-    participant API as Django View
-    participant F as DroneMissionFacade
-    participant S as MissionControlCenter
-    participant R as RouteStrategy
-    participant DB as Django ORM
-    participant Sub as MissionSubject
-    participant Obs as Observers ×3
-
-    UI->>API: POST /missions/create/
-    API->>F: create_and_start_mission(payload)
-    F->>DB: Drone.objects.get(id)
-    F->>R: calculate_route(origin, destination)
-    R-->>F: RouteResult
-    F->>DB: Mission.objects.create(...)
-    F->>S: register_mission(record)
-    F->>Sub: attach(LoggerObserver)
-    F->>Sub: attach(AlertObserver)
-    F->>Sub: attach(MissionStatusObserver)
-    F->>Sub: notify(MISSION_STARTED)
-    Sub->>Obs: update(event) ×3
-    F->>Sub: notify(simulated events)
-    Sub->>Obs: update(event) ×3
-    F->>Sub: notify(MISSION_COMPLETED)
-    Sub->>Obs: update(event) ×3
-    F->>DB: mission.save(status=COMPLETED)
-    F->>DB: drone.save(status=IDLE)
-    F-->>API: MissionSerializer(mission).data
-    API-->>UI: 201 Created + full mission JSON
-```
-
----
-
-### Observer Flow Diagram
-
-```mermaid
-flowchart LR
-    E([MissionEvent]) --> S{MissionSubject\nnotify}
-    S --> L[LoggerObserver\nwrites loguru entry]
-    S --> A[AlertObserver\nbuffers operator alert]
-    S --> M[MissionStatusObserver\nsyncs DB + Singleton]
-    M --> DB[(SQLite DB)]
-    M --> CC[MissionControlCenter\nSingleton]
-```
-
----
-
-## Simulation Flow
-
-When a mission is created through the frontend:
-
-1. **Select** mission type, Maricá region, drone, and route strategy
-2. **Submit** → POST to `/api/missions/create/`
-3. **Facade** receives the request and:
-   - Loads the drone via DB (created by Factory Method at seed time)
-   - Selects and executes the chosen Route Strategy
-   - Persists the Mission model
-   - Assembles the Observer chain
-   - Fires `MISSION_STARTED` → all observers react
-   - Simulates 0–2 random mid-mission events (weather, battery, signal)
-   - Fires `MISSION_COMPLETED` → observers sync final state
-4. **Response** includes the full mission record + event timeline
-5. **Dashboard** live-polls system status from the Singleton registry
-
-### Example Simulation Events
-
-| Event | Severity | Observer Reactions |
-|---|---|---|
-| `MISSION_STARTED` | INFO | Logger → log, StatusObs → DB ACTIVE |
-| `BAD_WEATHER` | ALERT | Logger → warning, AlertObs → operator alert |
-| `LOW_BATTERY` | WARNING | Logger → warning, AlertObs → operator alert |
-| `MISSION_COMPLETED` | SUCCESS | Logger → success, StatusObs → DB COMPLETED, drone IDLE |
-
----
-
-## Future Improvements
-
-| Improvement | Notes |
+| Camada | Tecnologia |
 |---|---|
-| WebSocket live updates | Replace polling with Django Channels |
-| PostgreSQL | Replace SQLite for production |
-| JWT Authentication | Operator login and role-based access |
-| Command Pattern | Undo/redo mission operations |
-| Decorator Pattern | Dynamic drone capability augmentation |
-| State Machine | Explicit drone lifecycle states (FSM) |
-| Real drone telemetry | MAVLink protocol integration |
-| Kubernetes deployment | Helm chart for production scale |
+| Frontend | React 18, Vite, TailwindCSS, Axios |
+| Backend | Python 3.12, Django 5, Django REST Framework |
+| Banco | PostgreSQL 16 (dois bancos separados) |
+| Gateway | nginx alpine |
+| Testes | pytest, pytest-django, pytest-bdd, pytest-cov |
+| Logging | loguru, Rich |
+| Container | Docker, Docker Compose |
+| Deploy | — |
 
 ---
 
-## Academic Notes
+## Decisões de arquitetura
 
-This project was designed to satisfy requirements for Software Architecture and Design Patterns coursework. Each pattern is:
+**Por que dois bancos separados?** Microsserviços que compartilham banco não são microsserviços — são um monolito com processo separado. Bancos separados garantem que uma migração no `missions` nunca afeta o schema de `drones`, e cada serviço pode escalar o banco de forma independente.
 
-- **Explicitly implemented** — not simulated or faked
-- **Meaningfully placed** — each pattern solves a real design problem in the domain
-- **Well-separated** — each pattern lives in its own module with explanatory header comments
-- **Interconnected** — the Facade composes all other patterns, demonstrating pattern interaction
+**Por que nginx como gateway e não chamar os serviços diretamente?** O frontend faz requisições para uma URL só. O gateway decide o roteamento. Se amanhã `drone-service` mudar de porta ou hostname, o frontend não muda nada — só o nginx.conf muda.
 
-The five patterns together demonstrate: creational (Factory Method), structural (Facade), and behavioural (Singleton, Strategy, Observer) categories of the GoF taxonomy.
+**Por que o monolito `backend/` foi mantido?** Ele contém os 164 testes (TDD/BDD) e toda a evidência de Clean Architecture que seria trabalhosa de replicar nos dois serviços separados. Os serviços em `services/` demonstram a separação em produção; o `backend/` demonstra a qualidade do código.
+
+**Por que `HttpDroneRepository` em vez de event sourcing ou message broker?** Para o escopo do projeto, HTTP síncrono é suficiente e torna o código legível por qualquer avaliador sem conhecimento de RabbitMQ ou Kafka. A interface abstrata `DroneRepository` permite trocar para mensageria futuramente sem tocar no caso de uso.
 
 ---
 
-*Vesper Drone Mission Control · Maricá/RJ Smart City Operations*
+*Vesper Drone Mission Control · Maricá/RJ*
