@@ -25,7 +25,11 @@ export default function MissionLogs() {
     fetchLogs().then(setLogs).finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 10_000);
+    return () => clearInterval(id);
+  }, []);
 
   const eventTypes = ["ALL", ...new Set(logs.map((l) => l.event_type))];
   const filtered   = filter === "ALL" ? logs : logs.filter((l) => l.event_type === filter);

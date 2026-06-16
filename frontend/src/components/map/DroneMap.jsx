@@ -2,16 +2,15 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { MapContainer, TileLayer, Polyline, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 
-// GPS coordinates sourced from guiamapa.com street-level data for each Maricá district
 const REGION_COORDS = {
-  "Centro":      [-22.9165, -42.8200],  // Praça central — confirmed
-  "Inoã":       [-22.9131, -42.9320],  // Travessa Fernando Mendes — confirmed
-  "Itaipuaçu":  [-22.9266, -42.9652],  // Av. Itaocaia, residential — confirmed
-  "Ponta Negra": [-22.9170, -42.7060],  // Vale da Figueira / Rua Vinte e Cinco — confirmed
-  "São José":   [-22.9180, -42.9550],  // São José do Imbassaí, north of lagoon
-  "Cordeirinho": [-22.9520, -42.7800],  // Estrada Beira Lagoa de Guarapina — confirmed
+  "Centro":      [-22.9171, -42.8188],
+  "Inoã":       [-22.9140, -42.9305],
+  "Itaipuaçu":  [-22.9667, -43.0167],
+  "Ponta Negra": [-22.9535, -42.6953],
+  "São José":   [-22.9303, -42.8844],
+  "Cordeirinho": [-22.9544, -42.7496],
 };
-const MARICA_CENTER = [-22.9190, -42.8200]; // City center, confirmed
+const MARICA_CENTER = [-22.9171, -42.8188];
 const DRONE_COLORS  = { SURVEILLANCE: "#00d4ff", EMERGENCY: "#ff3b5c", DELIVERY: "#00ff88" };
 const REPLAY_SPEED  = 20; // real-time × faster for replay
 

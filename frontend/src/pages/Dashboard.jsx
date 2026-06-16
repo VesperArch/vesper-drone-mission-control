@@ -15,9 +15,14 @@ export default function Dashboard() {
   const [drones, setDrones]     = useState([]);
 
   useEffect(() => {
-    fetchStatus().then((d) => setStats(d.statistics)).catch(() => {});
-    fetchMissions().then(setMissions).catch(() => {});
-    fetchDrones().then(setDrones).catch(() => {});
+    const load = () => {
+      fetchStatus().then((d) => setStats(d.statistics)).catch(() => {});
+      fetchMissions().then(setMissions).catch(() => {});
+      fetchDrones().then(setDrones).catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 15_000);
+    return () => clearInterval(id);
   }, []);
 
   const recentMissions = missions.slice(0, 4);
